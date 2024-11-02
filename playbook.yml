@@ -1,0 +1,117 @@
+---
+- name: Setup Docker environment on log-server and SSH server on client
+  hosts: logserver
+  become: true
+  vars:
+    compose_file_src: "./docker-compose.yml"  
+    script_file_src: "./auto_docker.sh"   
+    remote_path: "/home/{{ ansible_user }}/docker_automation"
+  tasks:
+  - name: Enable firewall
+    ufw:
+      state: enabled
+      policy: deny
+  - name: Firewall allow ssh from outside # Used by vagrant and ansible
+    ufw:
+      rule: allow
+      port: 22
+      proto: tcp
+      src: '172.16.0.0/12'
+  
+  - name: Firewall allow elasticsearch from inside
+    ufw:
+      rule: allow
+      port: 9200
+      proto: tcp
+      src: '192.168.0.0/16'
+
+  - name: Add Docker GPG apt Key
+    apt_key:
+      url: https://download.docker.com/linux/ubuntu/gpg
+      state: present
+
+  - name: Add Docker Repository
+    apt_repository:
+      repo: deb https://download.docker.com/linux/ubuntu jammy stable
+      state: present
+
+  - name: Update apt and install docker-ce
+    apt:
+      name: docker-ce
+      state: latest
+      update_cache: true
+  
+  - name: Create directory for automation files
+    file:
+      path: "{{ remote_path }}"
+      state: directory
+      owner: "{{ ansible_user }}"
+      mode: '0755'
+
+  - name: Copy docker-compose.yml to remote
+    copy:
+      src: "{{ compose_file_src }}"
+      dest: "{{ remote_path }}/docker-compose.yml"
+      mode: '0644'
+
+  - name: Copy auto_docker.sh to remote
+    copy:
+      src: "{{ script_file_src }}"
+      dest: "{{ remote_path }}/auto_docker.sh"
+      mode: '0755'
+
+  - name: Run the automation script in background
+    shell: "nohup ./auto_docker.sh > nohup.out 2>&1 &"
+    args:
+      chdir: "{{ remote_path }}"
+    async: 1000000000000000000000000000000
+    poll: 0
+
+  - name: Copy create-filebeat-user.sh to remote
+    copy:
+      src: "./create-filebeat-user.sh"
+      dest: "{{ remote_path }}/create-filebeat-user.sh"
+      mode: '0755'
+  
+  - name: Wait for port 9200 to become open on the host, don't start checking for 10 seconds
+    ansible.builtin.wait_for:
+      port: 9200
+      delay: 10
+  
+  - name: Create elastic users
+    shell: "./create-filebeat-user.sh > output.txt"
+    args:
+      chdir: "{{ remote_path }}"
+  
+  - name: Make sure service has time to start
+    pause:
+      seconds: 120
+
+- name: Setup SSH server on client
+  hosts: client
+  become: true
+  tasks:
+  - name: APT - Add elastic.co key
+    apt_key: url="https://artifacts.elastic.co/GPG-KEY-elasticsearch"
+
+  - name: APT - Add elastic.co repository
+    apt_repository: repo="deb https://artifacts.elastic.co/packages/8.x/apt stable main" filename="elastic-8.x" update_cache=yes
+
+  - name: FILEBEAT - Install Filebeat
+    apt: pkg=filebeat
+
+  - name: FILEBEAT - Copy filebeat config file
+    copy: 
+      src: "filebeat.yml"
+      dest: "/etc/filebeat/filebeat.yml"
+      mode: "0644"
+  
+  - name: FILEBEAT - Create keystore
+    shell: "filebeat keystore create --force"
+  
+  - name: FILEBEAT - Store password in keystore
+    shell: "echo oTCLMRVPO6 | filebeat keystore add ES_PWD --stdin --force"
+  
+  
+  - name: FILEBEAT - Restart filebeat
+    service: name=filebeat state=restarted 

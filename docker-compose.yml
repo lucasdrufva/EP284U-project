@@ -1,0 +1,16 @@
+services:
+  elasticsearch:
+    environment:
+      ELASTIC_PASSWORD: "vKmneuN1fF"
+      xpack.security.enabled: true
+      discovery.type: single-node
+    image:  docker.elastic.co/elasticsearch/elasticsearch:7.13.3
+    volumes:
+      - elasticsearch:/usr/share/elasticsearch/data:Z
+      - ./create-filebeat-user.sh:/usr/share/elasticsearch/create-filebeat-user.sh
+    ports:
+      - "9200:9200"
+
+
+volumes:
+  elasticsearch:
