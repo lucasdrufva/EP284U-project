@@ -11,13 +11,15 @@
     ufw:
       state: enabled
       policy: deny
+
   - name: Firewall allow ssh from outside # Used by vagrant and ansible
     ufw:
       rule: allow
       port: 22
       proto: tcp
-      src: '172.16.0.0/12'
-  
+      direction: in
+      interface: enp0s3
+
   - name: Firewall allow elasticsearch from inside
     ufw:
       rule: allow
@@ -87,7 +89,7 @@
     pause:
       seconds: 120
 
-- name: Setup SSH server on client
+- name: Setup client
   hosts: client
   become: true
   tasks:
@@ -111,7 +113,6 @@
   
   - name: FILEBEAT - Store password in keystore
     shell: "echo oTCLMRVPO6 | filebeat keystore add ES_PWD --stdin --force"
-  
   
   - name: FILEBEAT - Restart filebeat
     service: name=filebeat state=restarted 
